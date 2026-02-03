@@ -29,7 +29,6 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     'video.publish',
     'video.upload',
     'user.info.profile',
-    'user.info.stats',
   ];
   override maxConcurrentJob = 1; // TikTok has strict video upload limits
   dto = TikTokDto;
