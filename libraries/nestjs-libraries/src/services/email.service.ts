@@ -11,9 +11,11 @@ export class EmailService {
   constructor(private _temporalService: TemporalService) {
     this.emailService = this.selectProvider(process.env.EMAIL_PROVIDER!);
     console.log('Email service provider:', this.emailService.name);
+    if (this.hasProvider()) {
     for (const key of this.emailService.validateEnvKeys) {
       if (!process.env[key]) {
         console.error(`Missing environment variable: ${key}`);
+        }
       }
     }
   }
@@ -59,6 +61,10 @@ export class EmailService {
     replyTo?: string
   ) {
     if (to.indexOf('@') === -1) {
+      return;
+    }
+
+    if (!this.hasProvider()) {
       return;
     }
 
