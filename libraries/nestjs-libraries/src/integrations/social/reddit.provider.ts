@@ -32,11 +32,7 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
   }
 
   async refreshToken(refreshToken: string): Promise<AuthTokenDetails> {
-    const {
-      access_token: accessToken,
-      refresh_token: newRefreshToken,
-      expires_in: expiresIn,
-    } = await (
+    const { access_token: accessToken, expires_in: expiresIn } = await (
       await this.fetch('https://www.reddit.com/api/v1/access_token', {
         method: 'POST',
         headers: {
@@ -64,7 +60,7 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
       id,
       name,
       accessToken,
-      refreshToken: newRefreshToken,
+      refreshToken: refreshToken,
       expiresIn,
       picture: icon_img?.split?.('?')?.[0] || '',
       username: name,
@@ -188,15 +184,19 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
 
     const valueArray: PostResponse[] = [];
     for (const firstPostSettings of post.settings.subreddit) {
+      const kind =
+        firstPostSettings.value.type === 'media'
+          ? post.media[0].path.indexOf('mp4') > -1
+            ? 'video'
+            : 'image'
+          : firstPostSettings.value.type;
       const postData = {
         api_type: 'json',
         title: firstPostSettings.value.title || '',
         kind:
-          firstPostSettings.value.type === 'media'
-            ? post.media[0].path.indexOf('mp4') > -1
-              ? 'video'
-              : 'image'
-            : firstPostSettings.value.type,
+          ['link', 'self', 'image', 'video', 'videogif'].indexOf(kind) > -1
+            ? kind
+            : 'self',
         ...(firstPostSettings.value.flair
           ? { flair_id: firstPostSettings.value.flair.id }
           : {}),
@@ -222,7 +222,7 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
             }
           : {}),
         text: post.message,
-        sr: firstPostSettings.value.subreddit,
+        sr: firstPostSettings.value.subreddit.replace('/r/', '').toLowerCase(),
       };
 
       const all = await (
@@ -236,7 +236,11 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
         })
       ).json();
 
-      const { id: redditId, name, url } = await new Promise<{
+      const {
+        id: redditId,
+        name,
+        url,
+      } = await new Promise<{
         id: string;
         name: string;
         url: string;
@@ -400,7 +404,8 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
       {
         key: 'subreddit',
         type: 'string',
-        description: 'Search flairs and restrictions by subreddit key should be "/r/[name]"',
+        description:
+          'Search flairs and restrictions by subreddit key should be "/r/[name]"',
       },
     ],
   })

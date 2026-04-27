@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpException,
   Param,
   Post,
@@ -32,6 +33,11 @@ export class NoAuthIntegrationsController {
     private _refreshIntegrationService: RefreshIntegrationService,
     private _organizationService: OrganizationService
   ) {}
+
+  @Get('/')
+  getIntegrations() {
+    return this._integrationManager.getAllIntegrations();
+  }
 
   @Post('/social-connect/:integration')
   @CheckPolicies([AuthorizationActions.Create, Sections.CHANNEL])
@@ -226,6 +232,10 @@ export class NoAuthIntegrationsController {
           ? AuthService.fixedEncryption(
               Buffer.from(body.code, 'base64').toString()
             )
+          : integrationProvider.isChromeExtension
+          ? AuthService.signJWT(
+              JSON.parse(Buffer.from(body.code, 'base64').toString())
+            )
           : undefined
       );
 
@@ -256,14 +266,47 @@ export class NoAuthIntegrationsController {
       }
     }
 
+    const webhookUrl = await ioRedis.get(`webhookUrl:${body.state}`);
+    if (webhookUrl) {
+      try {
+        await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            params: AuthService.signJWT({
+              apiKey: org.apiKey,
+            }),
+          }),
+        });
+      } catch (err) {}
+
+      await ioRedis.del(`webhookUrl:${body.state}`);
+    }
+
+    const returnURL = await ioRedis.get(`redirect:${body.state}`);
+    if (returnURL) {
+      await ioRedis.del(`redirect:${body.state}`);
+    }
+
+    const extensionToken = integrationProvider.isChromeExtension
+      ? AuthService.signJWT({
+          integrationId: createUpdate.id,
+          organizationId: org.id,
+          internalId: String(id),
+          provider: integration,
+        })
+      : undefined;
+
     return {
       ...createUpdate,
       onboarding: onboarding === 'true',
       pages,
+      ...(returnURL ? { returnURL } : {}),
+      ...(extensionToken ? { extensionToken } : {}),
     };
   }
 
-  @Post('/provider/:id/connect')
+  @Post('/public/provider/:id/connect')
   async saveProviderPage(@Param('id') id: string, @Body() body: any) {
     if (!body.state) {
       throw new Error('Invalid state');
@@ -277,5 +320,76 @@ export class NoAuthIntegrationsController {
     const org = await this._organizationService.getOrgById(organization);
 
     return this._integrationService.saveProviderPage(org.id, id, body);
+  }
+
+  @Post('/extension-refresh')
+  async extensionRefreshCookies(
+    @Body() body: { jwt: string; cookies: string }
+  ) {
+    let payload: any;
+    try {
+      payload = AuthService.verifyJWT(body.jwt);
+    } catch {
+      throw new HttpException('Invalid token', 401);
+    }
+
+    const { integrationId, organizationId, internalId, provider } = payload;
+    if (!integrationId || !organizationId || !internalId || !provider) {
+      throw new HttpException('Invalid token payload', 400);
+    }
+
+    const integration = await this._integrationService.getIntegrationById(
+      organizationId,
+      integrationId
+    );
+    if (!integration || integration.internalId !== internalId) {
+      throw new HttpException('Integration not found', 404);
+    }
+
+    const integrationProvider =
+      this._integrationManager.getSocialIntegration(provider);
+    if (!integrationProvider?.isChromeExtension) {
+      throw new HttpException('Not a Chrome extension integration', 400);
+    }
+
+    const authResult = await integrationProvider.authenticate({
+      code: body.cookies,
+      codeVerifier: '',
+    });
+
+    if (typeof authResult === 'string') {
+      throw new HttpException(authResult, 400);
+    }
+
+    if (String(authResult.id) !== String(integration.internalId)) {
+      await this._integrationService.refreshNeeded(
+        organizationId,
+        integrationId
+      );
+      return { success: false, reason: 'account_mismatch' };
+    }
+
+    await this._integrationService.createOrUpdateIntegration(
+      undefined,
+      false,
+      organizationId,
+      integration.name,
+      undefined,
+      'social',
+      integration.internalId,
+      integration.providerIdentifier,
+      authResult.accessToken,
+      '',
+      authResult.expiresIn,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      AuthService.signJWT(
+        JSON.parse(Buffer.from(body.cookies, 'base64').toString())
+      )
+    );
+
+    return { success: true };
   }
 }

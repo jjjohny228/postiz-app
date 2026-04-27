@@ -8,6 +8,9 @@ interface VariableContextInterface {
   genericOauth: boolean;
   oauthLogoUrl: string;
   oauthDisplayName: string;
+  mcpUrl?: string;
+  cloudflareUrl: string;
+  mainUrl: string;
   frontEndUrl: string;
   plontoKey: string;
   storageProvider: 'local' | 'cloudflare';
@@ -25,6 +28,7 @@ interface VariableContextInterface {
   dub: boolean;
   transloadit: string[];
   sentryDsn: string;
+  extensionId: string;
 }
 const VariableContext = createContext({
   stripeClient: '',
@@ -33,6 +37,9 @@ const VariableContext = createContext({
   genericOauth: false,
   oauthLogoUrl: '',
   oauthDisplayName: '',
+  mcpUrl: '',
+  cloudflareUrl: '',
+  mainUrl: '',
   frontEndUrl: '',
   storageProvider: 'local',
   plontoKey: '',
@@ -49,6 +56,7 @@ const VariableContext = createContext({
   dub: false,
   transloadit: [],
   sentryDsn: '',
+  extensionId: '',
 } as VariableContextInterface);
 export const VariableContextComponent: FC<
   VariableContextInterface & {

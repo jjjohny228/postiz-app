@@ -51,7 +51,8 @@ export abstract class SocialAbstract {
   maxConcurrentJob = 1;
 
   public handleErrors(
-    body: string
+    body: string,
+    status: number,
   ):
     | { type: 'refresh-token' | 'bad-body' | 'retry'; value: string }
     | undefined {
@@ -78,7 +79,7 @@ export abstract class SocialAbstract {
     try {
       value = await func();
     } catch (err) {
-      const handle = this.handleErrors(safeStringify(err));
+      const handle = this.handleErrors(safeStringify(err), 200);
       value = { err: true, value: 'Unknown Error', ...(handle || {}) };
     }
 
@@ -121,9 +122,11 @@ export abstract class SocialAbstract {
       json = '{}';
     }
 
+    const handleError = this.handleErrors(json || '{}', request.status);
+
     if (
       request.status === 429 ||
-      request.status === 500 ||
+      (request.status === 500 && !handleError) ||
       json.includes('rate_limit_exceeded') ||
       json.includes('Rate limit')
     ) {
@@ -136,8 +139,6 @@ export abstract class SocialAbstract {
         ignoreConcurrency
       );
     }
-
-    const handleError = this.handleErrors(json || '{}');
 
     if (handleError?.type === 'retry') {
       await timer(5000);

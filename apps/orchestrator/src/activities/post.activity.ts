@@ -22,6 +22,7 @@ import {
   organizationId,
   postId as postIdSearchParam,
 } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
+import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 
 @Injectable()
 @Activity()
@@ -33,7 +34,8 @@ export class PostActivity {
     private _integrationService: IntegrationService,
     private _refreshIntegrationService: RefreshIntegrationService,
     private _webhookService: WebhooksService,
-    private _temporalService: TemporalService
+    private _temporalService: TemporalService,
+    private _subscriptionService: SubscriptionService
   ) {}
 
   @ActivityMethod()
@@ -47,7 +49,7 @@ export class PostActivity {
     for (const post of list) {
       await this._temporalService.client
         .getRawClient()
-        .workflow.signalWithStart('postWorkflowV101', {
+        .workflow.signalWithStart('postWorkflowV102', {
           workflowId: `post_${post.id}`,
           taskQueue: 'main',
           signal: 'poke',
@@ -83,6 +85,13 @@ export class PostActivity {
 
   @ActivityMethod()
   async getPostsList(orgId: string, postId: string) {
+    if (process.env.STRIPE_SECRET_KEY) {
+      const subscription = await this._subscriptionService.getSubscription(orgId);
+      if (!subscription) {
+        return [];
+      }
+    }
+
     const getPosts = await this._postService.getPostsRecursively(
       postId,
       true,
@@ -320,6 +329,38 @@ export class PostActivity {
       return refresh;
     } catch (err) {
       await this._refreshIntegrationService.setBetweenSteps(integration);
+      return false;
+    }
+  }
+
+  @ActivityMethod()
+  async refreshTokenWithCause(
+    integration: Integration,
+    cause: string
+  ): Promise<false | AuthTokenDetails> {
+    const getIntegration = this._integrationManager.getSocialIntegration(
+      integration.providerIdentifier
+    );
+
+    try {
+      const refresh = await this._refreshIntegrationService.refresh(
+        integration,
+        cause
+      );
+      if (!refresh) {
+        return false;
+      }
+
+      if (getIntegration.refreshWait) {
+        await timer(10000);
+      }
+
+      return refresh;
+    } catch (err) {
+      await this._refreshIntegrationService.setBetweenSteps(
+        integration,
+        cause
+      );
       return false;
     }
   }
