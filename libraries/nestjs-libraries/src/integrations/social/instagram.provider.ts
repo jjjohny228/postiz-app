@@ -8,7 +8,10 @@ import {
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { timer } from '@gitroom/helpers/utils/timer';
 import dayjs from 'dayjs';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  BadBody,
+  SocialAbstract,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { InstagramDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/instagram.dto';
 import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
@@ -523,6 +526,44 @@ export class InstagramProvider
     };
   }
 
+  private async waitForMediaReady(
+    type: string,
+    mediaId: string,
+    accessToken: string
+  ) {
+    let status = 'IN_PROGRESS';
+
+    while (status === 'IN_PROGRESS') {
+      const mediaStatus = await (
+        await this.fetch(
+          `https://${type}/v20.0/${mediaId}?access_token=${accessToken}&fields=status_code,status,error_message`,
+          undefined,
+          '',
+          0,
+          true
+        )
+      ).json();
+
+      status = mediaStatus.status_code || mediaStatus.status || 'IN_PROGRESS';
+
+      if (['ERROR', 'EXPIRED', 'FAILED'].includes(status)) {
+        throw new BadBody(
+          this.identifier,
+          JSON.stringify(mediaStatus),
+          '{}',
+          mediaStatus.error_message ||
+            `Instagram media processing failed with status ${status}`
+        );
+      }
+
+      if (status === 'FINISHED') {
+        return;
+      }
+
+      await timer(30000);
+    }
+  }
+
   async post(
     id: string,
     accessToken: string,
@@ -586,21 +627,7 @@ export class InstagramProvider
           )
         ).json();
         console.log('in progress2', id);
-
-        let status = 'IN_PROGRESS';
-        while (status === 'IN_PROGRESS') {
-          const { status_code } = await (
-            await this.fetch(
-              `https://${type}/v20.0/${photoId}?access_token=${accessToken}&fields=status_code`,
-              undefined,
-              '',
-              0,
-              true
-            )
-          ).json();
-          await timer(30000);
-          status = status_code;
-        }
+        await this.waitForMediaReady(type, photoId, accessToken);
         console.log('in progress3', id);
 
         return photoId;
@@ -676,20 +703,7 @@ export class InstagramProvider
         )
       ).json();
 
-      let status = 'IN_PROGRESS';
-      while (status === 'IN_PROGRESS') {
-        const { status_code } = await (
-          await this.fetch(
-            `https://${type}/v20.0/${containerId}?fields=status_code&access_token=${accessToken}`,
-            undefined,
-            '',
-            0,
-            true
-          )
-        ).json();
-        await timer(30000);
-        status = status_code;
-      }
+      await this.waitForMediaReady(type, containerId, accessToken);
 
       const { id: mediaId, ...all4 } = await (
         await this.fetch(
